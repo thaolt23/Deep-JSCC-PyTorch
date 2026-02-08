@@ -144,6 +144,10 @@ class FIS_ImportanceAssessment(nn.Module):
 
 
 class FIS_BitAllocation(nn.Module):
+    """
+    FIS Layer 2: Bit allocation with GLOBAL rate constraint
+    """
+
     def __init__(self, b_min=1, b_max=8):
         super().__init__()
         self.b_min = b_min
@@ -152,42 +156,74 @@ class FIS_BitAllocation(nn.Module):
     def forward(self, importance_map, SNR_dB, target_rate):
         """
         importance_map: (B, H, W) in [0,1]
-        SNR_dB: scalar
-        target_rate: (0,1]
+        SNR_dB: scalar (float)
+        target_rate: (0,1]  --- GLOBAL rate constraint
         """
 
-        # Normalize importance
+        # ===============================
+        # 1. Normalize importance
+        # ===============================
         I = importance_map
         I = (I - I.min()) / (I.max() - I.min() + 1e-8)
 
-        # Normalize SNR (assume 0–30 dB)
+        # ===============================
+        # 2. Normalize SNR (0–30 dB)
+        # ===============================
         snr_norm = torch.clamp(
             torch.tensor(SNR_dB / 30.0, device=I.device),
             0.0, 1.0
         )
 
-        # -------- Fuzzy membership (soft) --------
-        low_I    = torch.relu(0.5 - I)
-        high_I   = torch.relu(I - 0.5)
+        # ===============================
+        # 3. Soft fuzzy memberships
+        # ===============================
+        low_I  = torch.relu(0.5 - I)
+        high_I = torch.relu(I - 0.5)
 
         low_SNR  = torch.relu(0.5 - snr_norm)
         high_SNR = torch.relu(snr_norm - 0.5)
 
-        # -------- Fuzzy rules --------
+        # ===============================
+        # 4. Fuzzy rules
+        # ===============================
         rule_low  = low_I * low_SNR
         rule_mid  = (low_I * high_SNR) + (high_I * low_SNR)
         rule_high = high_I * high_SNR
 
-        # -------- Defuzzification --------
-        bits = (
+        # ===============================
+        # 5. Raw bit scores (NO target_rate here!)
+        # ===============================
+        bits_raw = (
             rule_low  * self.b_min +
-            rule_mid  * ((self.b_min + self.b_max) / 2) +
+            rule_mid  * ((self.b_min + self.b_max) / 2.0) +
             rule_high * self.b_max
         )
 
-        bits = bits * target_rate
+        # ===============================
+        # 6. GLOBAL rate constraint
+        # ===============================
+        B, H, W = bits_raw.shape
+        total_positions = H * W
 
-        bits = torch.clamp(bits.round(), self.b_min, self.b_max)
+        target_total_bits = (
+            target_rate * self.b_max * total_positions
+        )
+
+        scale = target_total_bits / (
+            bits_raw.sum(dim=(1, 2), keepdim=True) + 1e-8
+        )
+
+        bits = bits_raw * scale
+
+        # ===============================
+        # 7. Quantize + clamp
+        # ===============================
+        bits = torch.clamp(
+            bits.round(),
+            min=self.b_min,
+            max=self.b_max
+        )
+
         return bits
 
 
