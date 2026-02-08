@@ -28,7 +28,7 @@ def train_epoch(model, optimizer, param, data_loader):
     epoch_loss = 0
 
     for iter, (images, _) in enumerate(data_loader):
-        images = images.cuda() if param['parallel'] and torch.cuda.device_count(
+        images = images.cpu() if param['parallel'] and torch.cpu.device_count(
         ) > 1 else images.to(param['device'])
         optimizer.zero_grad()
         outputs = model.forward(images)
@@ -50,7 +50,7 @@ def evaluate_epoch(model, param, data_loader):
 
     with torch.no_grad():
         for iter, (images, _) in enumerate(data_loader):
-            images = images.cuda() if param['parallel'] and torch.cuda.device_count(
+            images = images.cpu() if param['parallel'] and torch.cpu.device_count(
             ) > 1 else images.to(param['device'])
             outputs = model.forward(images)
             outputs = image_normalization('denormalization')(outputs)
@@ -70,7 +70,7 @@ def config_parser_pipeline():
                         choices=['cifar10', 'imagenet'], help='dataset')
     parser.add_argument('--out', default='./out', type=str, help='out_path')
     parser.add_argument('--disable_tqdm', default=False, type=bool, help='disable_tqdm')
-    parser.add_argument('--device', default='cuda:0', type=str, help='device')
+    parser.add_argument('--device', default='cpu:0', type=str, help='device')
     parser.add_argument('--parallel', default=False, type=bool, help='parallel')
     parser.add_argument('--snr_list', default=['19', '13',
                         '7', '4', '1'], nargs='+', help='snr_list')
@@ -100,7 +100,7 @@ def main_pipeline():
     if dataset_name == 'cifar10':
         params['batch_size'] = 64  # 1024
         params['num_workers'] = 4
-        params['epochs'] = 1000
+        params['epochs'] = 50
         params['init_lr'] = 1e-3  # 1e-2
         params['weight_decay'] = 5e-4
         params['parallel'] = False
@@ -190,10 +190,10 @@ def train_pipeline(params):
     writer = SummaryWriter(log_dir=root_log_dir)
 
     # model init
-    device = torch.device(params['device'] if torch.cuda.is_available() else 'cpu')
-    if params['parallel'] and torch.cuda.device_count() > 1:
-        model = DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
-        model = model.cuda()
+    device = torch.device(params['device'] if torch.cpu.is_available() else 'cpu')
+    if params['parallel'] and torch.cpu.device_count() > 1:
+        model = DataParallel(model, device_ids=list(range(torch.cpu.device_count())))
+        model = model.cpu()
     else:
         model = model.to(device)
 
@@ -310,7 +310,7 @@ def train_pipeline(params):
 
 def train(args, ratio: float, snr: float):  # deprecated
 
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    device = torch.device(args.device if torch.cpu.is_available() else 'cpu')
     # load data
     if args.dataset == 'cifar10':
         transform = transforms.Compose([transforms.ToTensor(), ])
@@ -343,10 +343,10 @@ def train(args, ratio: float, snr: float):  # deprecated
     print("the inner channel is {}".format(c))
     model = DeepJSCC(c=c, channel_type=args.channel, snr=snr)
 
-    if args.parallel and torch.cuda.device_count() > 1:
-        model = DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
-        model = model.cuda()
-        criterion = nn.MSELoss(reduction='mean').cuda()
+    if args.parallel and torch.cpu.device_count() > 1:
+        model = DataParallel(model, device_ids=list(range(torch.cpu.device_count())))
+        model = model.cpu()
+        criterion = nn.MSELoss(reduction='mean').cpu()
     else:
         model = model.to(device)
         criterion = nn.MSELoss(reduction='mean').to(device)
@@ -359,7 +359,7 @@ def train(args, ratio: float, snr: float):  # deprecated
         run_loss = 0.0
         for images, _ in tqdm((train_loader), leave=False, disable=args.disable_tqdm):
             optimizer.zero_grad()
-            images = images.cuda() if args.parallel and torch.cuda.device_count() > 1 else images.to(device)
+            images = images.cpu() if args.parallel and torch.cpu.device_count() > 1 else images.to(device)
             outputs = model(images)
             outputs = image_normalization('denormalization')(outputs)
             images = image_normalization('denormalization')(images)
@@ -373,7 +373,7 @@ def train(args, ratio: float, snr: float):  # deprecated
             model.eval()
             test_mse = 0.0
             for images, _ in tqdm((test_loader), leave=False, disable=args.disable_tqdm):
-                images = images.cuda() if args.parallel and torch.cuda.device_count() > 1 else images.to(device)
+                images = images.cpu() if args.parallel and torch.cpu.device_count() > 1 else images.to(device)
                 outputs = model(images)
                 images = image_normalization('denormalization')(images)
                 outputs = image_normalization('denormalization')(outputs)
@@ -408,7 +408,7 @@ def config_parser():  # deprecated
     parser.add_argument('--parallel', default=False, type=bool, help='parallel')
     parser.add_argument('--if_scheduler', default=False, type=bool, help='if_scheduler')
     parser.add_argument('--step_size', default=640, type=int, help='scheduler')
-    parser.add_argument('--device', default='cuda:0', type=str, help='device')
+    parser.add_argument('--device', default='cpu:0', type=str, help='device')
     parser.add_argument('--gamma', default=0.5, type=float, help='gamma')
     parser.add_argument('--disable_tqdm', default=True, type=bool, help='disable_tqdm')
     return parser.parse_args()

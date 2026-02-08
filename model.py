@@ -194,19 +194,25 @@ class DeepJSCC_FIS(DeepJSCC):
         self.quantizer = AdaptiveQuantizer()
 
     def forward(self, x, fis_snr=10.0, target_rate=0.5, return_info=False):
+        # Encoder
         z = self.encoder(x)
 
+        # FIS
         importance = self.fis_importance(z)
+
         bits = self.fis_allocation(
-            importance,
-            snr=fis_snr,
-            target_rate=target_rate
+            importance,  # importance_map
+            fis_snr,  # SNR_dB (POSITIONAL)
+            target_rate
         )
+
         z_q = self.quantizer(z, bits)
 
+        # Channel (giữ nguyên DeepJSCC gốc)
         if self.channel is not None:
             z_q = self.channel(z_q)
 
+        # Decoder
         x_hat = self.decoder(z_q)
 
         if return_info:
@@ -216,6 +222,7 @@ class DeepJSCC_FIS(DeepJSCC):
             }
 
         return x_hat
+
 
 if __name__ == '__main__':
     model = DeepJSCC(c=20)
