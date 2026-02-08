@@ -33,7 +33,6 @@ def train_one_epoch(model, loader, optimizer, criterion, epoch, args):
 
     for batch_idx, (images, _) in enumerate(loader):
         images = images.to(device)
-
         optimizer.zero_grad()
 
         x_hat, info = model(
@@ -47,13 +46,21 @@ def train_one_epoch(model, loader, optimizer, criterion, epoch, args):
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
-
         psnr = get_psnr(
             image=x_hat * 255.0,
             gt=images * 255.0
         ).item()
+
+        total_loss += loss.item()
         total_psnr += psnr
+
+        # In batch đầu để xác nhận AvgBits (DEBUG CHUẨN)
+        if batch_idx == 0:
+            print(
+                f"[DEBUG] Epoch {epoch} "
+                f"AvgBits={info['avg_bits']:.2f} "
+                f"(min={info['min_bits']:.1f}, max={info['max_bits']:.1f})"
+            )
 
         if batch_idx % args.log_interval == 0:
             print(

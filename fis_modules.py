@@ -144,104 +144,52 @@ class FIS_ImportanceAssessment(nn.Module):
 
 
 class FIS_BitAllocation(nn.Module):
-    """
-    FIS Layer 2: Allocate bits based on importance and channel
-
-    Input: Importance map (B, H, W), SNR, rate budget
-    Output: Bit allocation (B, H, W) with values in [4, 12]
-    """
-
-    def __init__(self):
+    def __init__(self, b_min=1, b_max=8):
         super().__init__()
+        self.b_min = b_min
+        self.b_max = b_max
 
-        try:
-            import skfuzzy as fuzz
-            from skfuzzy import control as ctrl
-            self.use_fuzzy = True
-            self._setup_fuzzy_system()
-            print("FIS Layer 2: Using fuzzy inference system")
-        except ImportError:
-            print("Warning: Using linear bit allocation")
-            self.use_fuzzy = False
-
-    def _setup_fuzzy_system(self):
-        """Setup fuzzy system for bit allocation"""
-        import skfuzzy as fuzz
-        from skfuzzy import control as ctrl
-
-        # Input variables
-        self.importance = ctrl.Antecedent(np.arange(0, 1.01, 0.01), 'importance')
-        self.snr = ctrl.Antecedent(np.arange(0, 30.1, 0.1), 'snr')
-        self.rate_budget = ctrl.Antecedent(np.arange(0, 1.01, 0.01), 'rate_budget')
-
-        # Output
-        self.bits = ctrl.Consequent(np.arange(4, 12.1, 1), 'bits')
-
-        # Membership functions
-        self.importance['low'] = fuzz.trimf(self.importance.universe, [0, 0, 0.4])
-        self.importance['medium'] = fuzz.trimf(self.importance.universe, [0.3, 0.5, 0.7])
-        self.importance['high'] = fuzz.trimf(self.importance.universe, [0.6, 1, 1])
-
-        self.snr['low'] = fuzz.trimf(self.snr.universe, [0, 0, 10])
-        self.snr['medium'] = fuzz.trimf(self.snr.universe, [5, 15, 20])
-        self.snr['high'] = fuzz.trimf(self.snr.universe, [15, 30, 30])
-
-        self.rate_budget['low'] = fuzz.trimf(self.rate_budget.universe, [0, 0, 0.4])
-        self.rate_budget['medium'] = fuzz.trimf(self.rate_budget.universe, [0.3, 0.5, 0.7])
-        self.rate_budget['high'] = fuzz.trimf(self.rate_budget.universe, [0.6, 1, 1])
-
-        self.bits['low'] = fuzz.trimf(self.bits.universe, [4, 4, 6])
-        self.bits['medium'] = fuzz.trimf(self.bits.universe, [6, 8, 10])
-        self.bits['high'] = fuzz.trimf(self.bits.universe, [10, 12, 12])
-
-        # Rules
-        self.rules = [
-            ctrl.Rule(self.importance['high'] & self.snr['high'] & self.rate_budget['high'],
-                      self.bits['high']),
-            ctrl.Rule(self.importance['high'] & self.snr['medium'],
-                      self.bits['medium']),
-            ctrl.Rule(self.importance['medium'], self.bits['medium']),
-            ctrl.Rule(self.importance['low'], self.bits['low']),
-            ctrl.Rule(self.rate_budget['low'], self.bits['low']),
-        ]
-
-        self.ctrl_system = ctrl.ControlSystem(self.rules)
-        self.simulation = ctrl.ControlSystemSimulation(self.ctrl_system)
-
-    def forward(self, importance_map, SNR_dB, target_rate=0.5):
+    def forward(self, importance_map, SNR_dB, target_rate):
         """
-        importance_map: (B, H, W)
+        importance_map: (B, H, W) in [0,1]
         SNR_dB: scalar
-        target_rate: scalar [0, 1]
-
-        Returns: (B, H, W) bit allocation
+        target_rate: (0,1]
         """
-        B, H, W = importance_map.shape
-        bit_allocation = torch.zeros(B, H, W, dtype=torch.long, device=importance_map.device)
 
-        if self.use_fuzzy:
-            importance_np = importance_map.cpu().detach().numpy()
+        # Normalize importance
+        I = importance_map
+        I = (I - I.min()) / (I.max() - I.min() + 1e-8)
 
-            for b in range(B):
-                for i in range(H):
-                    for j in range(W):
-                        importance = float(importance_np[b, i, j])
+        # Normalize SNR (assume 0–30 dB)
+        snr_norm = torch.clamp(
+            torch.tensor(SNR_dB / 30.0, device=I.device),
+            0.0, 1.0
+        )
 
-                        try:
-                            self.simulation.input['importance'] = importance
-                            self.simulation.input['snr'] = float(SNR_dB)
-                            self.simulation.input['rate_budget'] = float(target_rate)
-                            self.simulation.compute()
-                            bits = int(np.round(self.simulation.output['bits']))
-                        except:
-                            bits = int(4 + importance * 8)
+        # -------- Fuzzy membership (soft) --------
+        low_I    = torch.relu(0.5 - I)
+        high_I   = torch.relu(I - 0.5)
 
-                        bit_allocation[b, i, j] = bits
-        else:
-            # Linear allocation
-            bit_allocation = (4 + importance_map * 8).long()
+        low_SNR  = torch.relu(0.5 - snr_norm)
+        high_SNR = torch.relu(snr_norm - 0.5)
 
-        return bit_allocation
+        # -------- Fuzzy rules --------
+        rule_low  = low_I * low_SNR
+        rule_mid  = (low_I * high_SNR) + (high_I * low_SNR)
+        rule_high = high_I * high_SNR
+
+        # -------- Defuzzification --------
+        bits = (
+            rule_low  * self.b_min +
+            rule_mid  * ((self.b_min + self.b_max) / 2) +
+            rule_high * self.b_max
+        )
+
+        bits = bits * target_rate
+
+        bits = torch.clamp(bits.round(), self.b_min, self.b_max)
+        return bits
+
 
 
 class AdaptiveQuantizer(nn.Module):
