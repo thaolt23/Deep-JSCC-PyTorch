@@ -13,3 +13,6 @@ output.txt
 out/
 out/logs/
 events.out.tfevents.*
+# IDE files
+.idea/
+
