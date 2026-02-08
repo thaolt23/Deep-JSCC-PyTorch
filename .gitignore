@@ -9,3 +9,7 @@ output.txt
 *.json
 .vscode/*
 *.sh
+# Output & logs
+out/
+out/logs/
+events.out.tfevents.*
