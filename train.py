@@ -190,7 +190,7 @@ def train_pipeline(params):
     writer = SummaryWriter(log_dir=root_log_dir)
 
     # model init
-    device = torch.device(params['device'] if torch.cpu.is_available() else 'cpu')
+    device = torch.device(params['device'] if torch.cuda.is_available() else 'cpu')
     if params['parallel'] and torch.cpu.device_count() > 1:
         model = DataParallel(model, device_ids=list(range(torch.cpu.device_count())))
         model = model.cpu()
